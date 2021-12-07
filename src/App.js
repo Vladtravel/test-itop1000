@@ -1,78 +1,114 @@
-import React, { useCallback, useEffect, useState, useMemo } from "react";
-import { Observable, Subject } from "rxjs";
-import { map, buffer, debounceTime, filter, takeUntil } from "rxjs/operators";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  interval,
+  Subject,
+  takeUntil,
+  buffer,
+  fromEvent,
+  filter,
+  tap,
+  map,
+  debounceTime,
+} from "rxjs";
+import setTimeFormat from "./utils/helpers";
 
-import { Controls } from "./components/Controls";
+function useObservable(ref, event) {
+  const [subject$, setSubject$] = useState();
+  useEffect(() => {
+    if (!ref.current) return;
+    setSubject$(fromEvent(ref.current, event));
+  }, [ref, event]);
+  return subject$;
+}
+
+function useClick(mouseClicks$, setState) {
+  useEffect(() => {
+    if (!mouseClicks$) return;
+    const subject$ = mouseClicks$
+      .pipe(
+        buffer(mouseClicks$.pipe(debounceTime(300))),
+        tap((e) => console.log(e)),
+        map((e) => e.length),
+        filter((e) => e === 2)
+      )
+      .subscribe((e) => setState(false));
+    return () => subject$.unsubscribe();
+  }, [mouseClicks$, setState]);
+}
 
 const App = () => {
-  const [state, setState] = useState("stop");
+  const [state, setState] = useState(false);
   const [time, setTime] = useState(0);
 
-  const stop$ = useMemo(() => new Subject(), []);
-  const click$ = useMemo(() => new Subject(), []);
+  const ref = useRef(null);
+  const mouseClicks$ = useObservable(ref, "click");
+  useClick(mouseClicks$, setState, state);
 
-  const start = () => {
-    setState("start");
-  };
-
-  const stop = useCallback(() => {
-    setTime(0);
-    setState("stop");
-  }, []);
-
-  const reset = useCallback(() => {
-    setTime(0);
-  }, []);
-
-  const wait = useCallback(() => {
-    click$.next();
-    setState("wait");
-    click$.next();
-  }, [click$]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const unsubscribe$ = new Subject();
+  const timer$ = interval(1000).pipe(takeUntil(unsubscribe$));
 
   useEffect(() => {
-    const doubleClick$ = click$.pipe(
-      buffer(click$.pipe(debounceTime(300))),
-      map((list) => list.length),
-      filter((value) => value >= 2)
-    );
-    const timer$ = new Observable((observer) => {
-      let count = 0;
-      const intervalId = setInterval(() => {
-        observer.next((count += 1));
-      }, 1000);
-
-      return () => {
-        clearInterval(intervalId);
-      };
+    timer$.subscribe(() => {
+      if (state) {
+        setTime((val) => val + 1);
+      }
     });
 
-    const subscribtion$ = timer$
-      .pipe(takeUntil(doubleClick$))
-      .pipe(takeUntil(stop$))
-      .subscribe({
-        next: () => {
-          if (state === "start") {
-            setTime((prev) => prev + 1);
-          }
-        },
-      });
-
     return () => {
-      subscribtion$.unsubscribe();
+      unsubscribe$.next();
+      unsubscribe$.complete();
     };
-  }, [click$, state, stop$]);
+  }, [state, timer$, unsubscribe$]);
+
+  function startHandler() {
+    setState(true);
+  }
+
+  function stopHandler() {
+    setTime(0);
+    setState(false);
+  }
+
+  function resetHandler() {
+    setTime(0);
+  }
 
   return (
-    <section className="stopwatch">
-      <Controls
-        time={time}
-        start={start}
-        stop={stop}
-        reset={reset}
-        wait={wait}
-      />
-    </section>
+    <>
+      <header className="header">
+        <h1 className="stopwatch headline">StopWatch</h1>
+        <h1 className="stopwatch indicator">{setTimeFormat(time)}</h1>
+      </header>
+      <section className="main">
+        <div className="container">
+          <button
+            type="button"
+            className="button is-dark"
+            onClick={startHandler}
+          >
+            Start
+          </button>
+          <button
+            type="button"
+            className="button is-dark"
+            onClick={stopHandler}
+          >
+            Stop
+          </button>
+          <button
+            type="button"
+            className="button is-dark"
+            onClick={resetHandler}
+          >
+            Reset
+          </button>
+          <button type="button" className="button is-dark" ref={ref}>
+            Wait
+          </button>
+        </div>
+      </section>
+    </>
   );
 };
 
